@@ -1,0 +1,487 @@
+---
+title: "Analysis of the Earth's Supply of Crude Oil"
+author: Evan Scheuermann, Lucy Haynes, Jake Scheidelman
+format: pdf
+engine: knitr
+editor: 
+  markdown: 
+    wrap: 72
+---
+
+```{r}
+library(tidyverse)
+library(data.table)
+library(ggplot2)
+library(caret)
+library(rpart)
+library(psych)
+library(zoo)
+library(reticulate)
+use_condaenv("base")
+```
+
+```{python}
+import numpy as np
+import matplotlib.pyplot as plt
+import pandas as pd
+```
+
+```{r}
+pop_data <- read_csv("data/world_usa_pop_data.csv")
+usa_data <- read.csv("data/usa_data_pt2_2.csv")
+```
+
+## More Realistic Estimate of the Total and Remaining Supply of Crude Oil
+
+```{python}
+# ?????? PARAMETERS ?????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
+oil_in_place      = 6e12      # barrels (USGS)
+recovery_factor   = 0.50
+used_oil          = 1.3e12
+gas_yield         = 0.45
+gal_per_bbl       = 42
+
+num_vehicles      = 1.446e9
+miles_per_year    = 10000
+mpg               = 25
+
+# ?????? CALCULATIONS ???????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
+recoverable   = oil_in_place * recovery_factor
+remaining     = recoverable - used_oil
+gasoline_bbl  = remaining * gas_yield
+gasoline_gal  = gasoline_bbl * gal_per_bbl
+
+annual_use    = num_vehicles * miles_per_year / mpg
+years_left    = gasoline_gal / annual_use
+
+# ?????? OUTPUT ?????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
+print("=== Part 2A: Realistic Oil Supply ===")
+print(f"Recoverable oil:          {recoverable:.2e} bbl")
+print(f"Remaining after use:      {remaining:.2e} bbl")
+print(f"Gasoline portion:         {gasoline_bbl:.2e} bbl")
+print(f"Total gasoline:           {gasoline_gal:.3e} gal")
+print(f"Annual consumption:       {annual_use:.3e} gal/yr")
+print(f"\n??? Years remaining:        {years_left:.2f} years")
+
+# ?????? BAR CHART ????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
+labels = ["Total Oil", "Recoverable", "Remaining", "Gasoline Only"]
+values = [oil_in_place, recoverable, remaining, gasoline_bbl]
+
+plt.figure(figsize=(8, 5))
+bars = plt.bar(labels, values,
+               color=["steelblue", "darkorange", "seagreen", "crimson"],
+               edgecolor="black")
+
+plt.title("Part 2A: Oil Supply at Each Stage (barrels)")
+plt.ylabel("Barrels of Oil")
+plt.ticklabel_format(style='sci', axis='y', scilimits=(0,0))
+
+for bar, val in zip(bars, values):
+    plt.text(bar.get_x() + bar.get_width()/2,
+             bar.get_height() * 1.01,
+             f"{val:.1e}",
+             ha='center', fontsize=9)
+
+plt.tight_layout()
+plt.show()
+```
+
+## Dynamic Fuel Efficiency Among Different Categories and Changing Number of Vehicles within Categories (Includes Increasing Popularity of EV)
+
+starting in 1970 with 10 year time steps:
+
+-   SUV mpg = 2.37*x + 10.9 .................... avg mi/yr 14299 -\>
+    ldlwb*
+
+-   Car mpg = 3.06*x + 11.5 ...................... avg mi/yr 10573 -\>
+    ldswb*
+
+-   Pickup mpg = 1.77*x + 12.9 ............... avg mi/yr 11318 -\>
+    ldlwb*
+
+-   Motorcycle mpg = -.671*x + 52.1 .... avg mi/yr 2005 -\> motorcycle*
+
+-   Semi-truck mpg = .543*x + 4.81 ....... avg mi/yr 62169 -\> truck
+    combo*
+
+-   Transit bus mpg = .197*x + 5.79 ....... avg mi/yr 42940 -\> bus*
+
+-   EV/hybrid mpg = 11.6*x - 7.9 ............. avg mi/yr 12000 -\> ev*
+
+-   Since none of the mpg categories reasonably map to 6-tire truck we
+    will assume constant mpg of 7.4 mpg for these vehicles and constant
+    23000 mi/yr
+
+changes:
+
+-   need to switch to thousand year time steps
+
+-   need to integrate differences in average yearly miles into the model
+
+```{r}
+usa_data_cln <- usa_data %>%
+  select(-Index) %>%
+  rename(vhcl_hwy_total = Highway..total..registered.vehicles.,
+         gdp_pcap = GDP.per.capita..current.US..,
+         us_pop = Population..total,
+         pop_dense = Population.density..people.per.sq..km.of.land.area.,
+         lt_vehicle_short = Light.duty.vehicle..short.wheel.base,
+         motorcycle = Motorcycle,
+         lt_vehicle_long = Light.duty.vehicle..long.wheel.base,
+         truck_6tr = Truck..single.unit.2.axle.6.tire.or.more,
+         truck_combo = Truck..combination,
+         bus = Bus) %>%
+  mutate(log_ev_prop = log(prop_ev))
+
+ev_reg <- lm(prop_ev ~ Year, data = usa_data_cln[15:17,])
+#summary(ev_reg)
+#plot(usa_data_cln$Year, usa_data_cln$prop_ev)
+#abline(ev_reg)
+ev_predictions <- predict(ev_reg, newdata = data.frame(Year = c(2290, 2295, 2300)))
+#print(ev_predictions)
+
+pop_data_reg <- pop_data %>%
+  select(-name, -index, -usa_pop, -usa_world_pop_ratio) %>%
+  mutate(pop = as.numeric(gsub(",", "", pop)))
+log_model <- nls(pop ~ SSlogis(year, Asym, xmid, scal), data = pop_data_reg)
+future_dates_df <- data.frame(year = seq(from = 1970, to = 10000, by = 10))
+future_preds_log <- predict(log_model, newdata = future_dates_df)
+future_plot_data <- data.frame(
+  year = future_dates_df$year,
+  pop = future_preds_log)
+future_plot_data$pop_adj <- future_plot_data$pop - (6000*(future_plot_data$year - 1969))*log(future_plot_data$year - 1969)
+```
+
+```{r}
+ggplot(data = future_plot_data, aes(x = year, y = pop_adj, color = "Estimated Population")) +
+  geom_line(linewidth = 1.1) +
+  geom_line(data = pop_data_reg, aes(x = year, y = pop, color = "Historical/Near Future Population"), linewidth = 1.1) +
+  labs(
+    title = "Population Growth",
+    x = "Year",
+    y = "Population") +
+  coord_cartesian(xlim = c(1800, 3000)) +
+  scale_color_manual(
+    name = "Legend",
+    breaks = c("Estimated Population", "Historical/Near Future Population"),
+    values = c("Estimated Population" = "black", "Historical/Near Future Population" = "lightslateblue")
+  ) +
+  theme(legend.position = c(.8, .2))
+```
+
+```{r}
+usa_world_pop_ratio <- mean(pop_data$usa_world_pop_ratio, na.rm = TRUE)
+future_plot_data$us_pop <- future_plot_data$pop*usa_world_pop_ratio
+
+veh_to_uspop <- mean(usa_data_cln$vhcl_hwy_total/usa_data_cln$us_pop)
+future_plot_data$us_hwy_tot <- future_plot_data$us_pop*veh_to_uspop
+
+worldveh_to_us <- 1645000000/298700000
+future_plot_data$world_veh_tot1 <- future_plot_data$us_hwy_tot*worldveh_to_us
+
+future_plot_data$world_ev_prop <- predict(ev_reg, newdata = data.frame(Year = future_plot_data$year))
+future_plot_data$world_ev_prop <- ifelse(future_plot_data$world_ev_prop < 0, 0, future_plot_data$world_ev_prop)
+future_plot_data$world_ev_prop <- ifelse(future_plot_data$world_ev_prop > 1, 1, future_plot_data$world_ev_prop)
+
+future_plot_data$world_veh_tot <- future_plot_data$world_veh_tot1*(1 - future_plot_data$world_ev_prop)
+future_plot_data$world_ev_tot <- future_plot_data$world_veh_tot1 - future_plot_data$world_veh_tot
+
+lts_prop <- mean(usa_data_cln$lt_vehicle_short/usa_data_cln$vhcl_hwy_total)
+moto_prop <- mean(usa_data_cln$motorcycle/usa_data_cln$vhcl_hwy_total)
+ltl_prop <- mean(usa_data_cln$lt_vehicle_long/usa_data_cln$vhcl_hwy_total)
+tr6_prop <- mean(usa_data_cln$truck_6tr/usa_data_cln$vhcl_hwy_total)
+tcombo_prop <- mean(usa_data_cln$truck_combo/usa_data_cln$vhcl_hwy_total)
+bus_prop <- mean(usa_data_cln$bus/usa_data_cln$vhcl_hwy_total)
+
+future_plot_data <- future_plot_data %>%
+  mutate(
+    world_lts = lts_prop*world_veh_tot,
+    world_moto = moto_prop*world_veh_tot,
+    world_ltl = ltl_prop*world_veh_tot,
+    world_6tr = tr6_prop*world_veh_tot,
+    world_tcombo = tcombo_prop*world_veh_tot,
+    world_bus = bus_prop*world_veh_tot,
+    world_lts_ev = lts_prop*world_ev_tot,
+    world_moto_ev = moto_prop*world_ev_tot,
+    world_ltl_ev = ltl_prop*world_ev_tot,
+    world_6tr_ev = tr6_prop*world_ev_tot,
+    world_tcombo_ev = tcombo_prop*world_ev_tot,
+    world_bus_ev = bus_prop*world_ev_tot,
+    sumworld_lts = world_lts + world_lts_ev,
+    sumworld_moto = world_moto + world_moto_ev,
+    sumworld_ltl = world_ltl + world_ltl_ev,
+    sumworld_6tr = world_6tr + world_6tr_ev,
+    sumworld_tcombo = world_tcombo + world_tcombo_ev,
+    sumworld_bus = world_bus + world_bus_ev,
+    suv_prop_ltl = 1606/(1606 + 233),
+    pickup_prop_ltl = 1 - suv_prop_ltl,
+    suv_galyr_dyn = world_ltl*suv_prop_ltl*14299/(2.37*(year - 1970) + 10.9), # totveh * (mi/yr) / (mi/gal) = total gal/yr    total ldlwb divided proportionally to suv and pickups
+    car_galyr_dyn = world_lts*10573/(3.06*(year - 1970) + 11.5),
+    pickup_galyr_dyn = world_ltl*pickup_prop_ltl*11318/(1.77*(year - 1970) + 12.9),
+    moto_galyr_dyn = world_moto*2005/(-.671*(year - 1970) + 52.1),
+    semi_galyr_dyn = world_tcombo*62169/(.543*(year - 1970) + 4.81),
+    bus_galyr_dyn = world_bus*42940/(.197*(year - 1970) + 5.79),
+    tr6_galyr_dyn = world_6tr*23000/7.4, # since none of the mpg categories reasonably map to 6 tire truck we will assume constant mpg of 7.4 mpg for these vehicles and constant 23000 mi/yr
+    ev_galyr_dyn = world_ev_tot*12000/(11.6*(year - 1970) - 7.9),
+    sum_galyr_dyn = 10*(suv_galyr_dyn + car_galyr_dyn + pickup_galyr_dyn + moto_galyr_dyn + semi_galyr_dyn + bus_galyr_dyn + tr6_galyr_dyn + ev_galyr_dyn)
+  )
+```
+
+```{r}
+ggplot(data = future_plot_data, aes(x = year, y = us_hwy_tot)) +
+  geom_point() +
+  geom_point(aes(y = (world_lts/worldveh_to_us) + (world_lts_ev/worldveh_to_us)), color = "palegreen") +
+  geom_point(aes(y = (world_moto/worldveh_to_us) + (world_moto_ev/worldveh_to_us)), color = "palegreen1") +
+  geom_point(aes(y = (world_ltl/worldveh_to_us) + (world_ltl_ev/worldveh_to_us)), color = "palegreen2") +
+  geom_point(aes(y = world_lts/worldveh_to_us), color = "blue") +
+  geom_point(aes(y = world_moto/worldveh_to_us), color = "blue1") +
+  geom_point(aes(y = world_ltl/worldveh_to_us), color = "blue2") +
+  geom_point(aes(y = world_6tr/worldveh_to_us), color = "blue3") +
+  geom_point(aes(y = world_tcombo/worldveh_to_us), color = "blue4") +
+  geom_point(aes(y = world_bus/worldveh_to_us), color = "darkblue") +
+  geom_point(data = usa_data, aes(x = Year, y = Highway..total..registered.vehicles.), color = "red") +
+  geom_point(data = usa_data_cln, aes(x = Year, y = lt_vehicle_short), color = "brown") +
+  geom_point(data = usa_data_cln, aes(x = Year, y = motorcycle), color = "brown1") +
+  geom_point(data = usa_data_cln, aes(x = Year, y = lt_vehicle_long), color = "brown2") +
+  geom_point(data = usa_data_cln, aes(x = Year, y = truck_6tr), color = "brown3") +
+  geom_point(data = usa_data_cln, aes(x = Year, y = truck_combo), color = "brown4") +
+  geom_point(data = usa_data_cln, aes(x = Year, y = bus), color = "darkred") +
+  coord_cartesian(xlim = c(1800, 2300)) +
+  labs(title = "US Vehicle Growth",
+       x = "Year",
+       y = "Number Vehicles")
+```
+
+```{r}
+ggplot(data = future_plot_data) +
+  geom_point(aes(x = year, y = us_hwy_tot, color = "US Vehicle Total"), size = 2) +
+  geom_line(aes(x = year, y = world_ev_tot/worldveh_to_us, color = "US EV Total"), linewidth = 1.1) +
+  geom_line(aes(x = year, y = world_veh_tot/worldveh_to_us, color = "US Combustion Total"), linewidth = 1.1) +
+  coord_cartesian(xlim = c(1800, 2300)) +
+  labs(title = "US Vehicle EV vs Combustion",
+       x = "Year",
+       y = "Number Vehicles") +
+  scale_color_manual(
+    name = "Legend",
+    breaks = c("US Vehicle Total", "US EV Total", "US Combustion Total"),
+    values = c("US Vehicle Total" = "black", "US EV Total" = "palegreen2", "US Combustion Total" = "royalblue")
+  ) +
+  theme(legend.position = c(.2, .8))
+
+future_plot_data[39:47, c("year", "world_veh_tot1", "sumworld_lts", "sumworld_moto",
+                         "sumworld_ltl", "sumworld_6tr", 
+                         "sumworld_tcombo", "sumworld_bus")]
+```
+
+```{r}
+replace_neg_with_prev_max <- function(x) {
+  x[x < 0] <- NA
+  cumulative_max_x <- cummax(x)
+  final_vec <- na.locf(cumulative_max_x, na.rm = FALSE, fromLast = FALSE)
+  return(final_vec)
+}
+
+future_plot_data <- future_plot_data %>%
+  mutate(
+    sum_galyr_dyn2 = ifelse(sum_galyr_dyn < 0, replace_neg_with_prev_max(sum_galyr_dyn), sum_galyr_dyn)
+  )
+
+  
+ggplot(data = future_plot_data, aes(x = year, y = sum_galyr_dyn)) +
+  geom_line() +
+  coord_cartesian(xlim = c(1970, 2350)) +
+  labs(title = "Annual Gasoline Usage",
+       x = "Year",
+       y = "Gallons of Gasoline")
+```
+
+```{python}
+future_plot_data_df = r.future_plot_data
+ryear              = future_plot_data_df["year"]
+tot_yearly_gas_use = future_plot_data_df["sum_galyr_dyn"]
+#tot_yearly_gas_use = tot_yearly_gas_use[5:]
+ryear = ryear[5:]
+tot_yearly_gas_use = tot_yearly_gas_use[5:]
+#print(tot_yearly_gas_use[:5])
+#print(ryear[:5])
+i = -1
+total_gas_temp = 3.213e13
+gas_plt = [3.213e13]
+time = [i + 2021]
+while True:
+  i += 1
+  if total_gas_temp <= 0:
+    print(f"Elapsed years since 2020: {ryear[i+5] - 2020}\n")
+    break
+  total_gas_temp -= tot_yearly_gas_use[i+5]
+  gas_plt.append(total_gas_temp)
+  time.append(i*10 + 2030)
+#print(time)
+plt.clf()
+plt.plot(time, gas_plt, label = "Remaining Gas (gal)")
+#plt.axvline(x = 2270, color = "red", linestyle = "--")
+plt.title("Remaining Gallons of Gasoline Over Time")
+plt.xlabel("Year")
+plt.ylabel("Gallons of Gasoline")
+plt.legend()
+plt.grid()
+plt.show()
+#print(time)
+#print(gas_plt)
+```
+
+## Part Four
+
+### Economic Factors that may Change the Rate at which we Consume Crude Oil
+
+```{r}
+oil_price_data <- read_csv("data/historical_oil_price_y2.csv")
+oil_cons_data <- read_csv("data/us_cons.csv")
+```
+
+```{r}
+oil_price_data <- oil_price_data %>%
+  mutate(
+    log_nomprice = log(nom_price),
+    log_infadj_price = log(infadj_price)
+  )
+
+oil_cons_data <- oil_cons_data %>%
+  mutate(
+    year = Year,
+    cons_mil = Consumption*365
+  ) %>%
+  select(-Year, -Consumption)
+
+cons_price_oil <- inner_join(oil_cons_data, oil_price_data, by = "year")
+cons_price_oil <- cons_price_oil %>%
+  mutate(
+    log_cons_mil = log(cons_mil),
+    change_cons = cons_mil/lag(cons_mil, 10),
+    change_logcons = log_cons_mil/lag(log_cons_mil, 10)
+  ) %>%
+  drop_na()
+
+cor(cons_price_oil)
+```
+
+```{r}
+cons_pr <- lm(change_cons ~ log_nomprice, data = cons_price_oil)
+summary(cons_pr)
+
+ggplot(data = cons_price_oil, aes(x = log_nomprice, y = change_logcons)) +
+  geom_point() +
+  geom_smooth(method = "lm", col = "red", se = FALSE)
+
+price_time_reg <- lm(log_nomprice ~ year, data = cons_price_oil)
+summary(price_time_reg)
+
+ggplot(data = oil_price_data, aes(x = year, y = log_nomprice)) +
+  geom_point() +
+  geom_smooth(method = "lm", col = "red", se = FALSE)
+```
+
+```{r}
+econ_fut <- data.frame(
+  year = seq(from = 2030, to = 2300, by = 10)
+)
+
+econ_fut$log_nomprice <- predict(price_time_reg, newdata = econ_fut)
+econ_fut$change_cons  <- predict(cons_pr, newdata = econ_fut)
+econ_fut <- econ_fut %>%
+  mutate(
+    cons_mil = accumulate(
+      change_cons, ~ .x * .y, .init = 6639.35
+    )[-1],
+    cons_mil = ifelse(cons_mil < 0, 0, cons_mil)
+  )
+```
+
+```{r}
+temp <- cons_price_oil %>%
+  filter(year %% 10 == 0) %>%
+  select(year, log_nomprice, change_cons, cons_mil)
+combined_prodcons <- rbind(temp, econ_fut)
+combined_prodcons <- combined_prodcons %>%
+  mutate(
+    galgas_cons = cons_mil*py$gas_yield*py$gal_per_bbl*1000000
+  )
+combined_prodcons <- combined_prodcons[-1,]
+
+ggplot(data = combined_prodcons, aes(x = year, y = galgas_cons)) +
+  geom_point() +
+  geom_smooth(method = "lm", col = "red", se = FALSE)
+```
+
+```{r}
+ggplot(data = future_plot_data, aes(x = year, y = sum_galyr_dyn)) +
+  geom_line() +
+  geom_point(data = combined_prodcons, aes(x = year, y = galgas_cons)) +
+  coord_cartesian(xlim = c(1970, 2350)) +
+  labs(title = "Annual Gasoline Usage",
+       x = "Year",
+       y = "Gallons of Gasoline")
+```
+
+```{r}
+test_sum_galyr_dyn <- future_plot_data$sum_galyr_dyn
+test_sum_galyr_dyn <- test_sum_galyr_dyn[3:24]
+
+test_galgas_cons <- combined_prodcons$galgas_cons
+test_galgas_cons <- test_galgas_cons[3:24]
+
+cor(test_sum_galyr_dyn, test_galgas_cons)
+```
+
+```{r}
+future_plot_data2 <- full_join(future_plot_data, combined_prodcons, by = "year")
+future_plot_data2 <- future_plot_data2 %>%
+  mutate(
+    sum_galyr_dyn = accumulate(
+      change_cons,
+      ~ .x * .y,
+      .init = sum_galyr_dyn[1]
+    )[-1],
+    sum_galyr_dyn = ifelse(sum_galyr_dyn < 0, 0, sum_galyr_dyn)
+  )
+
+ggplot(data = future_plot_data2, aes(x = year, y = sum_galyr_dyn)) +
+  geom_point(color = "red") +
+  geom_point(data = future_plot_data, aes(y = sum_galyr_dyn)) +
+  coord_cartesian(xlim = c(1970, 2200))
+```
+
+```{python}
+combined_prodcons_df = r.future_plot_data2
+ryear              = combined_prodcons_df["year"]
+tot_yearly_gas_use = combined_prodcons_df["sum_galyr_dyn"]
+#tot_yearly_gas_use = tot_yearly_gas_use[5:]
+ryear = ryear[5:]
+tot_yearly_gas_use = tot_yearly_gas_use[5:]
+#print(tot_yearly_gas_use[:5])
+#print(ryear[:5])
+i = -1
+total_gas_temp = 3.213e13
+gas_plt = [3.213e13]
+time = [i + 2021]
+while True:
+  i += 1
+  if total_gas_temp <= 0:
+    print(f"Elapsed years since 2020: {ryear[i+5] - 2020}\n")
+    break
+  total_gas_temp -= tot_yearly_gas_use[i+5]
+  gas_plt.append(total_gas_temp)
+  time.append(i*10 + 2030)
+#print(time)
+plt.clf()
+plt.plot(time, gas_plt, label = "Remaining Gas (gal)")
+#plt.axvline(x = 2270, color = "red", linestyle = "--")
+plt.title("Remaining Gallons of Gasoline Over Time")
+plt.xlabel("Year")
+plt.ylabel("Gallons of Gasoline")
+plt.legend()
+plt.grid()
+plt.show()
+#print(time)
+#print(gas_plt)
+```
