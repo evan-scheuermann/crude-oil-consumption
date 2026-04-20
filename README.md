@@ -33,8 +33,8 @@ in the `data/` folder.
 |------|--------|-------------|
 | `world_usa_pop_data.csv` | World Bank / US Census Bureau | Historical and projected world and US population |
 | `usa_data_pt2_2.csv` | Bureau of Transportation Statistics | US highway vehicle registrations by category, GDP, population density |
-| `historical_oil_price_y2.csv` | — | Historical nominal and inflation-adjusted crude oil prices |
-| `us_cons.csv` | — | US daily crude oil consumption |
+| `historical_oil_price_y2.csv` | US Energy Information Administration | Historical nominal crude oil prices |
+| `us_cons.csv` | US Department of Energy | US daily crude oil consumption |
 
 **Setup:** Clone the repo and update the file paths in the QMD to match
 your local directory before running.
@@ -113,8 +113,8 @@ and integrated with the Part 3 model.
 
 ## Files
 
-- `crude_oil_analysis.qmd` — Full analysis with code and narrative
-- `crude_oil_analysis.pdf` — Rendered report
+- `Group_Project.qmd` — Full analysis code
+- `MATH_222_Project_Write-Up.docx` — Complete report
 - `data/` — All input datasets
 
 ## Contributors
