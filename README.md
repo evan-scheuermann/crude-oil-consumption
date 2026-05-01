@@ -3,9 +3,6 @@
 **MATH 222 — Introduction to Dynamical Systems | St. John Fisher University**  
 Evan Scheuermann, Lucy Haynes, Jake Scheidelman
 
-> **Status:** In progress — further refinement and conclusion forthcoming.
-> Core modeling and analysis complete.
-
 ## Overview
 
 Crude oil is one of the most critical and finite natural resources in 
@@ -113,8 +110,9 @@ and integrated with the Part 3 model.
 
 ## Files
 
-- `Group_Project.qmd` — Full analysis code
-- `MATH_222_Project_Write-Up.docx` — Complete report
+- `Group_Project.qmd` — Analysis code (parts one through three)
+- `pt4_sens_analysis.R` — Analysis code (part four)
+- `MATH_222_Project_Write-Up.pdf` — Complete report
 - `data/` — All input datasets
 
 ## Contributors
